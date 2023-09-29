@@ -5,6 +5,7 @@
 library(shiny)
 library(tidyverse)
 library(DT)
+library(rstatix)
 
 # t-test app========================================================================================
 #create an app where a user generates two vectors using rnorm() by setting parameters in the UI then
@@ -133,7 +134,7 @@ ttestApp()
 #ui layout...row + columns
 
 
-## Function
+## Function----------
 make_boxplot <- function(samp1, samp2, n1, n2) {
   names(samp1) <- rep("sample 1", n1)
   names(samp2) <- rep("sample 2", n2)
@@ -147,7 +148,7 @@ make_boxplot <- function(samp1, samp2, n1, n2) {
 
 
 
-## UI
+## UI----------
 sampleInput <- function(id) {
   #inputs
   tagList(
@@ -177,7 +178,7 @@ ttestPlotOutput <- function(id) {
 
 
 
-## Server
+## Server----------
 sampleServer <- function(id) {
   moduleServer(id, function(input, output, session) {
     #create reactives from inputs
@@ -240,12 +241,19 @@ ttestApp()
 
 # t-test app with even more features================================================================
 #features: 
-  #UI: tabbed outputs--statistical output, boxplot, summary stats
+  #UI: 
+    #tabbed outputs--statistical output, boxplot, summary stats
+    #
   #Server: 
+    #use {rstatix} to conduct t-test
+    #using DTs from stat outputs
+    #convert samples to reactive df, which is then used to generate outputs via functions
+    #customized display of boxplots: size, color, overlaid points
+    #test whether variances and equal and returns as text & logic used in running test
 
 
 
-## Functions
+## Functions-----------
 ### Create DF
 create_df <- function(samp1, samp2, n1, n2) {
   names(samp1) <- rep("sample 1", n1)
@@ -269,24 +277,36 @@ calc_summ_stats <- function(data) {
                    sd=sd
               ), .names="{.fn}")) %>%
     ungroup() %>%
-    mutate(across(where(is.double), ~signif(.x, 3)))
+    mutate(across(where(is.double), ~signif(.x, 3))) %>%
+    rename(group="name")
 }
 
 
 ### Make boxplots
 make_boxplot <- function(data) {
   data %>%
-    ggplot() +
-    geom_boxplot(aes(x=name, y=value, color=name)) +
+    ggplot(aes(x=name, y=value)) +
+    geom_boxplot(color="black", outlier.shape=NA) +
+    geom_jitter(aes(color=name), size=2) +
     scale_color_viridis_d(end=0.6, guide="none") +
-    theme_bw(base_size=12)
+    labs(x="") +
+    theme_bw(base_size=16) 
+}
+
+
+## Run Levene's test
+run_levene_test <- function(data) {
+  data %>%
+    levene_test(value ~ name, center=mean) %>%
+    mutate(sig = p <= 0.05) %>%
+    pull(sig) 
 }
 
 
 ### Run ttest
-run_ttest <- function(data) {
+run_ttest <- function(data, var_equal) {
   data %>%
-    t_test(value ~ name, detailed=TRUE) %>%
+    t_test(value ~ name, detailed=TRUE, var.equal=var_equal) %>%
     select(type="alternative", group1, group2, df, t="statistic", conf.low, conf.high, p) %>%
     mutate(sig = p <= 0.05,
            across(where(is.numeric), ~signif(.x, 3)))
@@ -294,7 +314,7 @@ run_ttest <- function(data) {
 
 
 
-## UI
+## UI----------
 sampleInput <- function(id) {
   #inputs
   tagList(
@@ -314,14 +334,27 @@ sampleInput <- function(id) {
 
 ttestPlotOutput <- function(id) {
   tabsetPanel(id="tabs_ttest",
+    #summ stats panel
     tabPanel("Summary Stats",
+      h4(strong("Summary stats")),
       DTOutput(NS(id, "stats_table"))
     ),
+    #boxplot panel
     tabPanel("Boxplots",
-      plotOutput(NS(id, "plot"))
+      fluidRow(
+        h4(strong("Boxplots of samples 1 and 2")),
+        column(2),
+        column(8,
+          plotOutput(NS(id, "plot"))
+        ),
+        column(2)
+      )
     ),
+    #ttest panel
     tabPanel("t-test output",
-      h4("t-test Statistical Output"),
+      h4(strong("t-test output")),
+      textOutput(NS(id, "var_status_out")),
+      br(),
       DTOutput(NS(id, "ttest_table"))
     )
   )
@@ -329,7 +362,7 @@ ttestPlotOutput <- function(id) {
 
 
 
-## Server
+## Server----------
 sampleServer <- function(id) {
   moduleServer(id, function(input, output, session) {
     #create reactives from inputs
@@ -340,28 +373,40 @@ sampleServer <- function(id) {
     #create DF
     df <- reactive(create_df(samp1(), samp2(), input$n1, input$n2))
     
+    #equal_var
+    equal_var <- reactive(run_levene_test(df()))
+  
+    
     #use reactives to run t-test and generate boxplot
     list(
       stats_out = reactive(calc_summ_stats(df())),
-      box_out = reactive(make_boxplot(df())),
-      t_test_out = reactive(run_ttest(df()))
       
+      box_out = reactive(make_boxplot(df())),
+      
+      var_status = reactive(equal_var()),
+      
+      t_test_out = reactive(run_ttest(df(), var_equal=equal_var()))
     )
   })
 }
 
-ttestPlotServer <- function(id, summ_stats, plot_out, tt_out) {
+
+ttestPlotServer <- function(id, summ_stats, plot_out, equal_var, tt_out) {
   moduleServer(id, function(input, output, session) {
     
     #stats table output
-    output$stats_table <- renderDT({summ_stats()  %>% 
-        DT::datatable()})
+    output$stats_table <- renderDT(summ_stats(), rownames=FALSE, options=list(dom="t"))
     
     #plot output
     output$plot <- renderPlot({plot_out()})
     
+    
+    output$var_status_out <- renderText(paste0("Variances are ", 
+                                               if(equal_var()) {"unequal"} else{"equal"},
+                                               "."))
+    
     #t-test output
-    output$ttest_table <- renderDT(tt_out())
+    output$ttest_table <- renderDT(tt_out(), rownames=FALSE, options=list(dom="t"))
   })
 }
   
@@ -372,10 +417,10 @@ ttestApp <- function() {
   ui <- fluidPage(
     #add more layout: sidebarLayout
     sidebarLayout(
-      sidebarPanel(
+      sidebarPanel(width=3,
         sampleInput("data"),
       ),
-      mainPanel(
+      mainPanel(width=9,
         ttestPlotOutput("stats")
       )
     )
@@ -383,7 +428,11 @@ ttestApp <- function() {
   
   server <- function(input, output, session) {
     x <- sampleServer("data")
-    ttestPlotServer("stats", summ_stats=x$stats_out, plot_out=x$box_out, tt_out=x$t_test_out)
+    ttestPlotServer("stats", 
+                    summ_stats=x$stats_out, 
+                    plot_out=x$box_out, 
+                    equal_var=x$var_status, 
+                    tt_out=x$t_test_out)
   }
  
   shinyApp(ui, server)
@@ -393,12 +442,11 @@ ttestApp <- function() {
 ttestApp()
 
 
-# Add 1) test for equal variance and then run correct version based on results of test; 
+# Add 
   #2) toggle to add significance start onto boxplot; 
-  #3) use rstatix::t_test off of df
+  #4) use radio buttons to navigate tabsetPanel (which will be made hidden)
+  #5) make boxplot interactive 
 
 
-# Add checkboxes to display: 1) raw data in a table, 2) summary data in a table, 3) boxplots (with
-  #significance star if p< .05)
 
 
