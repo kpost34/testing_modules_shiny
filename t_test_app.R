@@ -243,7 +243,8 @@ ttestApp()
 #features: 
   #UI: 
     #tabbed outputs--statistical output, boxplot, summary stats
-    #
+    #conditionally displays * on boxplot (if significant) and accompanying caption
+    #made ttest output sig cell bold and highlighted in yellow
   #Server: 
     #use {rstatix} to conduct t-test
     #using DTs from stat outputs
@@ -283,13 +284,18 @@ calc_summ_stats <- function(data) {
 
 
 ### Make boxplots
-make_boxplot <- function(data) {
+make_boxplot <- function(data, sig) {
+  cap <- "The averages of samples 1 are significantly different at \u03b1 = 0.05"
+  
+  
   data %>%
     ggplot(aes(x=name, y=value)) +
     geom_boxplot(color="black", outlier.shape=NA) +
     geom_jitter(aes(color=name), size=2) +
+    {if(sig) annotate(geom="text", label="*", x=1.5, y=.99*max(data[["value"]]), size=12)} +
     scale_color_viridis_d(end=0.6, guide="none") +
-    labs(x="") +
+    xlab("") +
+    {if(sig) labs(caption=cap)} +
     theme_bw(base_size=16) 
 }
 
@@ -316,6 +322,10 @@ run_ttest <- function(data, var_equal) {
 
 ## UI----------
 sampleInput <- function(id) {
+  choices_radio <- c("Summary stats"="summ_stats",
+                     "Boxplot"="box",
+                     "t-test output"="tt_out")
+  
   #inputs
   tagList(
     "Sample 1",
@@ -327,31 +337,34 @@ sampleInput <- function(id) {
     sliderInput(NS(id, "n2"), "Sample Size", value=13, min=6, max=20, step=1),
     sliderInput(NS(id, "mean2"), "Population Mean", value=3, min=1, max=5, step=1),
     sliderInput(NS(id, "sd2"), "Population SD", value=0.3, min=0.1, max=0.5, step=0.1),
-    br()
+    br(),
+    radioButtons(NS(id, "rad_tab"), "Which output would you like to see?",
+                 choices=choices_radio, selected=character(0))
   )
 }
 
 
 ttestPlotOutput <- function(id) {
-  tabsetPanel(id="tabs_ttest",
+  tabsetPanel(id="tabs_ttest", type="tabs",
+    #blank tab
+    # tabPanel("blank"),
     #summ stats panel
-    tabPanel("Summary Stats",
+    tabPanel("summ_stats",
       h4(strong("Summary stats")),
       DTOutput(NS(id, "stats_table"))
     ),
     #boxplot panel
-    tabPanel("Boxplots",
+    tabPanel("box",
       fluidRow(
         h4(strong("Boxplots of samples 1 and 2")),
-        column(2),
         column(8,
           plotOutput(NS(id, "plot"))
         ),
-        column(2)
+        column(4)
       )
     ),
     #ttest panel
-    tabPanel("t-test output",
+    tabPanel("tt_out",
       h4(strong("t-test output")),
       textOutput(NS(id, "var_status_out")),
       br(),
@@ -365,6 +378,7 @@ ttestPlotOutput <- function(id) {
 ## Server----------
 sampleServer <- function(id) {
   moduleServer(id, function(input, output, session) {
+
     #create reactives from inputs
     samp1 <- reactive(rnorm(input$n1, input$mean1, input$sd1))
     samp2 <- reactive(rnorm(input$n2, input$mean2, input$sd2))
@@ -375,24 +389,34 @@ sampleServer <- function(id) {
     
     #equal_var
     equal_var <- reactive(run_levene_test(df()))
+    
+    #significant ttest
+    tt_sig <- reactive({run_ttest(df(), var_equal=!equal_var()) %>%
+                      pull(sig)})
   
     
     #use reactives to run t-test and generate boxplot
     list(
+      rad_selected = reactive(input$rad_tab),
+      
       stats_out = reactive(calc_summ_stats(df())),
       
-      box_out = reactive(make_boxplot(df())),
+      box_out = reactive(make_boxplot(df(), sig=tt_sig())),
       
       var_status = reactive(equal_var()),
       
-      t_test_out = reactive(run_ttest(df(), var_equal=equal_var()))
+      t_test_out = reactive(run_ttest(df(), var_equal=!equal_var()))
     )
   })
 }
 
 
-ttestPlotServer <- function(id, summ_stats, plot_out, equal_var, tt_out) {
+ttestPlotServer <- function(id, sel, summ_stats, plot_out, equal_var, tt_out) {
   moduleServer(id, function(input, output, session) {
+    #ui
+    # observeEvent(sel(), {
+    #   updateTabsetPanel(session, "tabs_ttest", selected = sel())
+    # })
     
     #stats table output
     output$stats_table <- renderDT(summ_stats(), rownames=FALSE, options=list(dom="t"))
@@ -406,7 +430,9 @@ ttestPlotServer <- function(id, summ_stats, plot_out, equal_var, tt_out) {
                                                "."))
     
     #t-test output
-    output$ttest_table <- renderDT(tt_out(), rownames=FALSE, options=list(dom="t"))
+    output$ttest_table <- renderDT({datatable(tt_out(), rownames=FALSE, options=list(dom="t")) %>% 
+                                     formatStyle("sig", fontWeight="bold", backgroundColor="yellow")
+                          })
   })
 }
   
@@ -429,6 +455,7 @@ ttestApp <- function() {
   server <- function(input, output, session) {
     x <- sampleServer("data")
     ttestPlotServer("stats", 
+                    sel=x$rad_selected,
                     summ_stats=x$stats_out, 
                     plot_out=x$box_out, 
                     equal_var=x$var_status, 
@@ -443,7 +470,6 @@ ttestApp()
 
 
 # Add 
-  #2) toggle to add significance start onto boxplot; 
   #4) use radio buttons to navigate tabsetPanel (which will be made hidden)
   #5) make boxplot interactive 
 
