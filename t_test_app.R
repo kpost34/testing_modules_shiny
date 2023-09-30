@@ -385,44 +385,32 @@ sampleServer <- function(id) {
     
     
     #create DF
-    df <- reactive(create_df(samp1(), samp2(), input$n1, input$n2))
-    
-    #equal_var
-    equal_var <- reactive(run_levene_test(df()))
-    
-    #significant ttest
-    tt_sig <- reactive({run_ttest(df(), var_equal=!equal_var()) %>%
-                      pull(sig)})
-  
-    
-    #use reactives to run t-test and generate boxplot
-    list(
-      rad_selected = reactive(input$rad_tab),
-      
-      stats_out = reactive(calc_summ_stats(df())),
-      
-      box_out = reactive(make_boxplot(df(), sig=tt_sig())),
-      
-      var_status = reactive(equal_var()),
-      
-      t_test_out = reactive(run_ttest(df(), var_equal=!equal_var()))
-    )
+    reactive(create_df(samp1(), samp2(), input$n1, input$n2))
   })
 }
 
 
-ttestPlotServer <- function(id, sel, summ_stats, plot_out, equal_var, tt_out) {
+ttestPlotServer <- function(id, dat) {
   moduleServer(id, function(input, output, session) {
     #ui
     # observeEvent(sel(), {
     #   updateTabsetPanel(session, "tabs_ttest", selected = sel())
     # })
     
+    #equal_var
+    equal_var <- reactive(run_levene_test(dat()))
+    
+    #significant ttest
+    tt_sig <- reactive({run_ttest(dat(), var_equal=!equal_var()) %>%
+                      pull(sig)})
+    
+    
+    
     #stats table output
-    output$stats_table <- renderDT(summ_stats(), rownames=FALSE, options=list(dom="t"))
+    output$stats_table <- renderDT(calc_summ_stats(dat()), rownames=FALSE, options=list(dom="t"))
     
     #plot output
-    output$plot <- renderPlot({plot_out()})
+    output$plot <- renderPlot({make_boxplot(dat(), sig=tt_sig())})
     
     
     output$var_status_out <- renderText(paste0("Variances are ", 
@@ -430,7 +418,9 @@ ttestPlotServer <- function(id, sel, summ_stats, plot_out, equal_var, tt_out) {
                                                "."))
     
     #t-test output
-    output$ttest_table <- renderDT({datatable(tt_out(), rownames=FALSE, options=list(dom="t")) %>% 
+    output$ttest_table <- renderDT({datatable(run_ttest(dat(), var_equal=!equal_var()), 
+                                              rownames=FALSE, 
+                                              options=list(dom="t")) %>% 
                                      formatStyle("sig", fontWeight="bold", backgroundColor="yellow")
                           })
   })
@@ -453,13 +443,9 @@ ttestApp <- function() {
   )
   
   server <- function(input, output, session) {
-    x <- sampleServer("data")
-    ttestPlotServer("stats", 
-                    sel=x$rad_selected,
-                    summ_stats=x$stats_out, 
-                    plot_out=x$box_out, 
-                    equal_var=x$var_status, 
-                    tt_out=x$t_test_out)
+    # x <- sampleServer("data")
+    df <- sampleServer("data")
+    ttestPlotServer("stats", dat=df)
   }
  
   shinyApp(ui, server)
