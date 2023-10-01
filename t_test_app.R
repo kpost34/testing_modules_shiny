@@ -6,6 +6,7 @@ library(shiny)
 library(tidyverse)
 library(DT)
 library(rstatix)
+library(ggiraph)
 
 # t-test app========================================================================================
 #create an app where a user generates two vectors using rnorm() by setting parameters in the UI then
@@ -288,16 +289,21 @@ calc_summ_stats <- function(data) {
 make_boxplot <- function(data, sig) {
   cap <- "The averages of samples 1 and 2 are significantly different at \u03b1 = 0.05"
   
-  
-  data %>%
+  gg_box_jitter <- data %>%
+    mutate(id=row_number()) %>%
     ggplot(aes(x=name, y=value)) +
     geom_boxplot(color="black", outlier.shape=NA) +
-    geom_jitter(aes(color=name), size=2) +
+    geom_jitter_interactive(aes(color=name, 
+                                tooltip=paste0(name, "\n", "value: ", signif(value, 3)), 
+                                data_id=id), 
+                            size=2) +
     {if(sig) annotate(geom="text", label="*", x=1.5, y=.99*max(data[["value"]]), size=12)} +
     scale_color_viridis_d(end=0.6, guide="none") +
     xlab("") +
     {if(sig) labs(caption=cap)} +
     theme_bw(base_size=16) 
+  
+  girafe(ggobj=gg_box_jitter)
 }
 
 
@@ -338,7 +344,7 @@ sampleInput <- function(id) {
     sliderInput(NS(id, "n2"), "Sample Size", value=13, min=6, max=20, step=1),
     sliderInput(NS(id, "mean2"), "Population Mean", value=3, min=1, max=5, step=1),
     sliderInput(NS(id, "sd2"), "Population SD", value=0.3, min=0.1, max=0.5, step=0.1),
-    br(),
+    hr(),
     radioButtons(NS(id, "rad_tab"), "Which output would you like to see?",
                  choices=choices_radio, selected=character(0))
   )
@@ -357,9 +363,9 @@ ttestPlotOutput <- function(id) {
     #boxplot panel
     tabPanel("box",
       fluidRow(
-        h4(strong("Boxplots of samples 1 and 2")),
+        h4(strong("Boxplot of samples 1 and 2")),
         column(8,
-          plotOutput(NS(id, "plot"))
+          girafeOutput(NS(id, "plot"))
         ),
         column(4)
       )
@@ -412,7 +418,7 @@ ttestPlotServer <- function(id, sel, dat) {
     output$stats_table <- renderDT(calc_summ_stats(dat()), rownames=FALSE, options=list(dom="t"))
     
     #plot output
-    output$plot <- renderPlot({make_boxplot(dat(), sig=tt_sig())})
+    output$plot <- renderGirafe({make_boxplot(dat(), sig=tt_sig())})
     
     
     output$var_status_out <- renderText(paste0("Variances are ", 
@@ -433,6 +439,10 @@ ttestPlotServer <- function(id, sel, dat) {
 ### App 
 ttestApp <- function() {
   ui <- fluidPage(
+    #add CSS to see horizontal line
+    tags$head(
+      tags$style(HTML("hr {border-top: 1px solid #000000;}"))
+    ),
     #add more layout: sidebarLayout
     sidebarLayout(
       sidebarPanel(width=3,
@@ -454,11 +464,4 @@ ttestApp <- function() {
 }
 
 ttestApp()
-
-
-# Add 
-  #5) make boxplot interactive 
-
-
-
 
