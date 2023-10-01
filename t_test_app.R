@@ -251,6 +251,7 @@ ttestApp()
     #convert samples to reactive df, which is then used to generate outputs via functions
     #customized display of boxplots: size, color, overlaid points
     #test whether variances and equal and returns as text & logic used in running test
+    #enabled use of radio button to navigate output tabs
 
 
 
@@ -285,7 +286,7 @@ calc_summ_stats <- function(data) {
 
 ### Make boxplots
 make_boxplot <- function(data, sig) {
-  cap <- "The averages of samples 1 are significantly different at \u03b1 = 0.05"
+  cap <- "The averages of samples 1 and 2 are significantly different at \u03b1 = 0.05"
   
   
   data %>%
@@ -345,9 +346,9 @@ sampleInput <- function(id) {
 
 
 ttestPlotOutput <- function(id) {
-  tabsetPanel(id="tabs_ttest", type="tabs",
+  tabsetPanel(id=NS(id, "tabs_ttest"), type="hidden",
     #blank tab
-    # tabPanel("blank"),
+    tabPanel("blank"),
     #summ stats panel
     tabPanel("summ_stats",
       h4(strong("Summary stats")),
@@ -385,17 +386,20 @@ sampleServer <- function(id) {
     
     
     #create DF
-    reactive(create_df(samp1(), samp2(), input$n1, input$n2))
+    list(
+      sel_tab = reactive(input$rad_tab),
+      df = reactive(create_df(samp1(), samp2(), input$n1, input$n2))
+    )
   })
 }
 
 
-ttestPlotServer <- function(id, dat) {
+ttestPlotServer <- function(id, sel, dat) {
   moduleServer(id, function(input, output, session) {
     #ui
-    # observeEvent(sel(), {
-    #   updateTabsetPanel(session, "tabs_ttest", selected = sel())
-    # })
+    observeEvent(sel(), {
+      updateTabsetPanel(session, "tabs_ttest", selected = sel())
+    })
     
     #equal_var
     equal_var <- reactive(run_levene_test(dat()))
@@ -403,8 +407,6 @@ ttestPlotServer <- function(id, dat) {
     #significant ttest
     tt_sig <- reactive({run_ttest(dat(), var_equal=!equal_var()) %>%
                       pull(sig)})
-    
-    
     
     #stats table output
     output$stats_table <- renderDT(calc_summ_stats(dat()), rownames=FALSE, options=list(dom="t"))
@@ -443,9 +445,8 @@ ttestApp <- function() {
   )
   
   server <- function(input, output, session) {
-    # x <- sampleServer("data")
-    df <- sampleServer("data")
-    ttestPlotServer("stats", dat=df)
+    x <- sampleServer("data")
+    ttestPlotServer("stats", sel=x$sel_tab, dat=x$df)
   }
  
   shinyApp(ui, server)
@@ -456,7 +457,6 @@ ttestApp()
 
 
 # Add 
-  #4) use radio buttons to navigate tabsetPanel (which will be made hidden)
   #5) make boxplot interactive 
 
 
