@@ -1,4 +1,4 @@
-#Example apps using modules
+#t-test apps with and without modules
 #Created by Keith Post on 9/24/23
 
 #load packages
@@ -253,6 +253,7 @@ ttestApp()
     #customized display of boxplots: size, color, overlaid points
     #test whether variances and equal and returns as text & logic used in running test
     #enabled use of radio button to navigate output tabs
+    #made plot interactive
 
 
 
