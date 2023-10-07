@@ -263,6 +263,7 @@ lmApp()
 
 # lm app with Added Features========================================================================
 library(broom)
+library(rlang)
 #features:
   #UI:
 
@@ -296,6 +297,10 @@ dfs_num_ds <- dfs_ds %>%
   names()
 
 
+### Summary stats colnames
+nm_summ_stats <- c("var", "n", "min", "mean", "median", "max", "sd")
+
+
 # Functions
 ## Assess whether vars match dataset
 check_vars <- function(var_list, data) {
@@ -315,7 +320,13 @@ plot_scatter <- function(data, var_list, reg, ci_val) {
 
 
 ## Calculate summary stats
-calc_summ_stats <- function(data) {
+calc_summ_stats <- function(data, resort=FALSE, var_list=NA) {
+  #convert list of symbols to a chr vector
+  if(resort) {
+    var_chr <- map_chr(var_list, as_string)
+  }
+
+  
   data %>%
     pivot_longer(cols=everything(), names_to="var", values_to="value") %>%
     group_by(var) %>%
@@ -328,7 +339,8 @@ calc_summ_stats <- function(data) {
                    sd=sd
               ), .names="{.fn}")) %>%
     ungroup() %>%
-    mutate(across(where(is.numeric), ~signif(.x, 3)))
+    mutate(across(where(is.numeric), ~signif(.x, 3))) %>%
+    {if(resort) mutate(., var=as.factor(var), var=fct_relevel(var, var_chr)) else .}
 }
 
 
@@ -359,9 +371,7 @@ scatterTablesOutput <- function(id) {
     tabPanel("table1",
       DTOutput(ns("raw_tab")),
       br(),
-      DTOutput(ns("summ_tab")),
-      br(),
-      DTOutput(ns("summ_vars_tab"))
+      DTOutput(ns("summ_tab"))
     ),
     tabPanel("plot",
       plotOutput(ns("main_plot"))
@@ -412,28 +422,34 @@ scatterTablesServer <- function(id, data, vars, smooth, ci) {
     
     #generate summary stats table
     output$raw_tab <- renderDT({
-      data() %>%
-        head(n=10) %>%
-        tryCatch(error=function(e) NULL) %>%
-        datatable(caption="Data Sample", rownames=FALSE, options=list(dom="t")) 
+      if(length(vars())==2) {
+        data() %>%
+          head(n=10) %>%
+          datatable(caption="Data Sample", rownames=FALSE, options=list(dom="t")) %>%
+          formatStyle(c(as_string(vars()[[1]]), as_string(vars()[[2]])),
+                      fontWeight="bold", backgroundColor="yellow")
+      } else {
+        data() %>%
+          head(n=10) %>%
+          datatable(caption="Data Sample", rownames=FALSE, options=list(dom="t")) %>%
+          tryCatch(error=function(e) NULL)
+      }
     })
     
     
     output$summ_tab <- renderDT({
-      calc_summ_stats(data()) %>%
-        tryCatch(error=function(e) NULL) %>%
-        datatable(caption="Summary Stats", rownames=FALSE, options=list(dom="t"))
+      if(length(vars())==2) {
+        calc_summ_stats(data(), resort=TRUE, var_list=vars()) %>%
+          datatable(caption="Summary Stats", rownames=FALSE, options=list(dom="t", ordering=F)) %>%
+          formatStyle(nm_summ_stats, 
+                      fontWeight="bold", backgroundColor=styleRow(1:2, "bisque"))
+      } else {
+        calc_summ_stats(data()) %>%
+          datatable(caption="Summary Stats", rownames=FALSE, options=list(dom="t")) %>%
+          tryCatch(error=function(e) NULL)
+      }
     })
-    
-    output$summ_vars_tab <- renderDT({
-      #req
-      req(length(vars())==2, #two vars selected
-          check_vars(vars(), data())) #vars must match what's in data()
-      
-      data() %>%
-        select(!!!vars()) %>%
-        calc_summ_stats()
-    })
+  
   })
 }
 
