@@ -1,4 +1,4 @@
-#**Testing Modules Shiny Apps**
+# **Testing Modules Shiny Apps**
 This project contains versions of two mini-apps (t-test app, and Linear Model app) which represent
 my first experience building Shiny apps using modules.
 
