@@ -264,7 +264,7 @@ lmApp()
 # lm app with Added Features========================================================================
 library(broom)
 library(rlang)
-library(shinythemes)
+library(bslib)
 
 #features:
   #UI:
