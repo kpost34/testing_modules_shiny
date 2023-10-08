@@ -264,12 +264,22 @@ lmApp()
 # lm app with Added Features========================================================================
 library(broom)
 library(rlang)
+library(shinythemes)
+
 #features:
   #UI:
+    #added tabsetPanel with three tabs
+    #added theme to app
+
 
 
   #Server:
     #created plot_scatter() & removed extra reactive obj
+    #added raw data and summary stats tables
+    #added conditional formatting to indicate which vars are selected
+    #modeled data
+    #wrote model summary table
+    
 
 
 
@@ -301,46 +311,47 @@ dfs_num_ds <- dfs_ds %>%
 nm_summ_stats <- c("var", "n", "min", "mean", "median", "max", "sd")
 
 
+### Tab choices
+choices_tab <- c("Summary stats"="table1",
+                 "Plot"="plot",
+                 "Model summary"="table2")
+
+
 # Functions
 ## Assess whether vars match dataset
-check_vars <- function(var_list, data) {
-  as.character(var_list) %in% names(data) %>%
+check_vars <- function(sel_vars, data) {
+  sel_vars %in% names(data) %>%
     sum()==2
 }
 
 
 ## Make scatter plot with SE (and CI) as options
-plot_scatter <- function(data, var_list, reg, ci_val) {
+plot_scatter <- function(data, sel_vars, reg, ci_val) {
   data %>%
-    ggplot(aes(x=!!var_list[[1]], y=!!var_list[[2]])) +
+    ggplot(aes(x=!!sym(sel_vars[1]), y=!!sym(sel_vars[2]))) +
     geom_point() +
     {if(reg=="Yes") geom_smooth(method="lm", se=ifelse(ci_val=="Yes", TRUE, FALSE))} +
-    theme_bw()
+    theme_bw() 
 }
 
 
 ## Calculate summary stats
-calc_summ_stats <- function(data, resort=FALSE, var_list=NA) {
-  #convert list of symbols to a chr vector
-  if(resort) {
-    var_chr <- map_chr(var_list, as_string)
-  }
-
-  
+calc_summ_stats <- function(data, resort=FALSE, sel_vars=NA) {
   data %>%
     pivot_longer(cols=everything(), names_to="var", values_to="value") %>%
     group_by(var) %>%
     summarize(across(everything(),
               list(n=length,
-                   min=min,
-                   mean=mean,
-                   median=median,
-                   max=max,
-                   sd=sd
+                   min=~min(.x, na.rm=TRUE),
+                   mean=~mean(.x, na.rm=TRUE),
+                   median=~median(.x, na.rm=TRUE),
+                   max=~max(.x, na.rm=TRUE),
+                   sd=~sd(.x, na.rm=TRUE)
               ), .names="{.fn}")) %>%
     ungroup() %>%
     mutate(across(where(is.numeric), ~signif(.x, 3))) %>%
-    {if(resort) mutate(., var=as.factor(var), var=fct_relevel(var, var_chr)) else .}
+    {if(resort) mutate(., var=as.factor(var), var=fct_relevel(var, sel_vars)) else .} %>%
+    arrange(var)
 }
 
 
@@ -353,8 +364,12 @@ dataInput <- function(id) {
     #inputs
     selectizeInput(ns("sel_df"), label="Choose a dataset", choices=dfs_num_ds, multiple=TRUE,
                    options=list(maxItems=1)),
-    varSelectizeInput(ns("sel_vars"), label="Choose two variables", multiple=TRUE, data=NULL,
+    selectizeInput(ns("sel_vars"), label="Choose two variables", multiple=TRUE, choices=NULL,
                      options=list(maxItems=2)),
+    br(),
+    radioButtons(ns("rad_tab"), label="Choose an output", choices=choices_tab, 
+                 selected=character(0)),
+    br(),
     radioButtons(ns("rad_lm"), label="Display linear model?", choices=c("Yes", "No"),
                  selected="No"),
     radioButtons(ns("rad_se"), label="Display confidence interval?", choices=c("Yes", "No"),
@@ -366,8 +381,9 @@ dataInput <- function(id) {
 scatterTablesOutput <- function(id) {
   ns <- NS(id)
 
-  tabsetPanel(id=ns("main_tabset"), type="tabs",
+  tabsetPanel(id=ns("main_tabset"), type="hidden",
     #output
+    tabPanel("blank"),
     tabPanel("table1",
       DTOutput(ns("raw_tab")),
       br(),
@@ -375,6 +391,9 @@ scatterTablesOutput <- function(id) {
     ),
     tabPanel("plot",
       plotOutput(ns("main_plot"))
+    ),
+    tabPanel("table2",
+      DTOutput(ns("mod_tab"))
     )
   )
 }
@@ -390,8 +409,8 @@ dataServer <- function(id) {
 
     #update inputs
     observeEvent(input$sel_df, {
-      updateVarSelectizeInput(session, inputId="sel_vars", label="Choose two variables", data=data(),
-                              options=list(maxItems=2))
+      updateSelectizeInput(session, inputId="sel_vars", label="Choose two variables", 
+                          choices=names(data()), options=list(maxItems=2))
     })
     
     list(
@@ -399,14 +418,25 @@ dataServer <- function(id) {
       data = reactive(data()), #note: need to re-wrap data() in reactive() before exporting
       vars = reactive(input$sel_vars),
       smooth = reactive(input$rad_lm),
-      ci = reactive(input$rad_se)
+      ci = reactive(input$rad_se),
+      sel_tab = reactive(input$rad_tab)
     )
   })
 }
 
 
-scatterTablesServer <- function(id, data, vars, smooth, ci) {
+scatterTablesServer <- function(id, sel_tab, data, vars, smooth, ci) {
   moduleServer(id, function(input, output, session) {
+    #ui
+    observeEvent(sel_tab(), {
+      updateTabsetPanel(session, "main_tabset", selected=sel_tab())
+    })
+    
+    
+    #server
+    f1 <- reactive(as.formula(paste(vars()[2], vars()[1], sep="~")))
+    
+    mod <- reactive(lm(f1(), data=data()))
     
     #plot output
     output$main_plot <- renderPlot({
@@ -426,8 +456,7 @@ scatterTablesServer <- function(id, data, vars, smooth, ci) {
         data() %>%
           head(n=10) %>%
           datatable(caption="Data Sample", rownames=FALSE, options=list(dom="t")) %>%
-          formatStyle(c(as_string(vars()[[1]]), as_string(vars()[[2]])),
-                      fontWeight="bold", backgroundColor="yellow")
+          formatStyle(vars(), fontWeight="bold", backgroundColor="aquamarine")
       } else {
         data() %>%
           head(n=10) %>%
@@ -439,7 +468,7 @@ scatterTablesServer <- function(id, data, vars, smooth, ci) {
     
     output$summ_tab <- renderDT({
       if(length(vars())==2) {
-        calc_summ_stats(data(), resort=TRUE, var_list=vars()) %>%
+        calc_summ_stats(data(), resort=TRUE, sel_vars=vars()) %>%
           datatable(caption="Summary Stats", rownames=FALSE, options=list(dom="t", ordering=F)) %>%
           formatStyle(nm_summ_stats, 
                       fontWeight="bold", backgroundColor=styleRow(1:2, "bisque"))
@@ -449,6 +478,20 @@ scatterTablesServer <- function(id, data, vars, smooth, ci) {
           tryCatch(error=function(e) NULL)
       }
     })
+    
+    
+    output$mod_tab <- renderDT({
+      req(length(vars())==2, #two vars selected
+          check_vars(vars(), data())) #vars must match what's in data()
+    
+      tidy(mod()) %>%
+        mutate(across(!term, ~signif(.x, 3))) %>%
+        mutate(sig=ifelse(p.value <= 0.05, "Yes", "No")) %>%
+        datatable(caption="Model Summary", rownames=FALSE, options=list(dom="t", ordering=F)) %>%
+        formatStyle(columns="p.value",
+                    valueColumns="sig",
+                    backgroundColor=styleEqual(levels="Yes", values="Yellow"))
+    })
   
   })
 }
@@ -457,7 +500,7 @@ scatterTablesServer <- function(id, data, vars, smooth, ci) {
   
 ## App 
 lmApp <- function() {
-  ui <- fluidPage(
+  ui <- fluidPage(theme=bslib::bs_theme(bootswatch="journal"),
     sidebarLayout(
       sidebarPanel(width=3,
         dataInput("df")
@@ -470,7 +513,7 @@ lmApp <- function() {
   
   server <- function(input, output, session) {
     x <- dataServer("df")
-    scatterTablesServer("out", x$data, x$vars, x$smooth, x$ci)
+    scatterTablesServer("out", x$sel_tab, x$data, x$vars, x$smooth, x$ci)
   }
  
   shinyApp(ui, server)
@@ -481,16 +524,6 @@ lmApp <- function() {
 lmApp()
 
 
-#figure out a way to highlight cols and rows of two chosen variables & eliminate third table
-#add titles, remove rownames, show x entries, search bar etc
-
-
-
-
-
-
-#later features....data transformations, test of normality of residuals, output table with model
-  #parameters, output table of summary stats
 
 
 
